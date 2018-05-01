@@ -1,0 +1,3 @@
+Optional testbed for PC1053
+
+Using a second Arduino Mega 2560 and some SMS sockets, you can use the testdriver.ino file and its Fritzing diagram to put the PC1053 through its paces without plugging into an actual mainframe. It provides the ability to send every command and character that the mainframe can produce; it even provides a 2 ms skew in setting of the tilt/rotate lines to verify that this device can handle slight variations in timing from the mainframe. 
