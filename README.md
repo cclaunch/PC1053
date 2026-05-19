@@ -1,7 +1,7 @@
 # PC1053
 Emulates an IBM 1053 (print-only I/O Selectric) as used on IBM 1130 and other mainframes of the 1960s
 
-The 1053 attaches to a mainframe with three SMS paddle cards - two carry signals and the third delivers power. This emulator is built around an Arduino Mega 2560 R3, a relay module and some simple circuitry, hooked to three SMS paddle cards. It provides a serial port connection over a USB cable for communicating with a terminal emulator program on a personal computer to display the output that is being 'typed' by the mainframe. 
+The 1053 attaches to a mainframe with three SMS paddle cards - two carry signals and the third delivers power. This emulator is built around an Arduino Mega 2560 R3, four MOSFET switches and some simple circuitry, hooked to three SMS paddle cards. It provides a serial port connection over a USB cable for communicating with a terminal emulator program on a personal computer to display the output that is being 'typed' by the mainframe. 
 
 This emulates the console typeball that is installed on an IBM 1130 system, but can be easily modified to support a different (or additional) typeballs. The typeball has characters that are not in standard ASCII, e.g. ¢ and ¬ which can be displayed in UTF8.
 
