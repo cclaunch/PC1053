@@ -3,7 +3,7 @@ Emulates an IBM 1053 (print-only I/O Selectric) as used on IBM 1130 and other ma
 
 The 1053 attaches to a mainframe with three SMS paddle cards - two carry signals and the third delivers power. This emulator is built around an Arduino Mega 2560 R3, a relay module and some simple circuitry, hooked to three SMS paddle cards. It provides a serial port connection over a USB cable for communicating with a terminal emulator program on a personal computer to display the output that is being 'typed' by the mainframe. 
 
-This emulates the console typeball that is installed on an IBM 1130 system, but can be easily modified to support a different (or additional) typeballs. The typeball has characters that are not in standard ASCII, e.g. � and � which can be displayed in UTF8.
+This emulates the console typeball that is installed on an IBM 1130 system, but can be easily modified to support a different (or additional) typeballs. The typeball has characters that are not in standard ASCII, e.g. ¬ (logical not) and ¢ (cent sign) which can be displayed in UTF8.
 
 Using a terminal emulator that supports UTF8 encoding and ANSI colors provides the most realistic output, since the text will display in either black or red on white background - the text color is selectable by ribbon shift commands from the mainframe to the 1053. The terminal emulator provides a few commands that can be issued to the PC1053 - mainly to set the left and right margins, but also to set, clear and display tab stops that will be in effect. 
 
