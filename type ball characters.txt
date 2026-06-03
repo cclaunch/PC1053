@@ -1,0 +1,17 @@
+To display the APL ball correctly, the APL385 Unicode font must be installed on the viewing system. 
+
+
+
+APL ball
+
+lower case:  .HIGFEDBC[QRPONMKLYZXWVUST]8976542301,←/+JxA
+
+upper case:  ⍺⊥∩⌊ε_∇∆⍳∘'⎕∣⊤○⋆?⍴⌈∼↓∪⍵⊃↑⊂\"¯>≥\=≤<≠∨∧)\\→;-(÷:
+
+
+
+Normal ball
+
+lower case:  ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890#/-,&$@.
+
+upper case:  ABCDEFGHIJKLMNOPQRSTUVWXYZ(+<¬);*'\"|=_?:>!%¢
