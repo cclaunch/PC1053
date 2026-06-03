@@ -408,7 +408,7 @@ void setup() {
   Serial.println("     TC xxx            clear tab at column xxx");
   Serial.println("     TABS =            display columns where tabs are set");
   Serial.println("     TYPE *            set typeball to * :");
-  Serial.println("          N            Normal console typeball");
+  Serial.println("          N            Normal console typeball (969)");
   Serial.println("          A            APL typeball (988)");
 
 } // end of Setup()
@@ -525,7 +525,7 @@ int getcolumn(char * command, int margin) {
     total += (int(command[4])-48) * 10;
     total += int(command[5]) - 48;
     if (( total <= 0) or (total > 120)) {
-      Serial.print("Margin column number out of range - "); Serial.println(total);
+      Serial.print("Column number out of range - "); Serial.println(total);
       return margin;
     }
   } else {
@@ -682,28 +682,39 @@ void loop() {
       command[cpointer++] = Serial.read();
       if
        (cpointer > 6) {
-        Serial.println("input command too long, ignored");
+        Serial.print("input command ");
+        Serial.print(command[0]);
+        Serial.print(command[1]);
+        Serial.print(command[2]);
+        Serial.println(" too long, ignored");
         cpointer = 0;
       }
       if ((command [cpointer-1] == '\r') or (command[cpointer-1] == '\n')) {
         if (cpointer > 1) {
-          Serial.println("short command, ignored");
+          Serial.print("short command ");
+          Serial.println(" is ignored");
         }
         cpointer = 0;
       }
       if (cpointer == 6) {
         // command is complete, process it
         if ((command[0] == 'L') and (command[1] == 'M') and (command[2] == ' ')){
-          lmargin = getcolumn(command,lmargin);
-          Serial.print("Left Margin set to "); Serial.println(lmargin);
+          tabcol = getcolumn(command,lmargin);
+          if (tabcol > 0) {
+            lmargin = tabcol;
+            Serial.print("Left Margin set to "); Serial.println(lmargin);
+          }
         } else if ((command[0] == 'R') and (command[1] == 'M') and (command[2] == ' ')){
-          rmargin = getcolumn(command,rmargin);
-          Serial.print("Right Margin set to "); Serial.println(rmargin);
+          tabcol = getcolumn(command,rmargin);
+          if (tabcol > 0){
+            rmargin = tabcol;
+             Serial.print("Right Margin set to "); Serial.println(rmargin);
+          }
         } else if ((command[0] == 'T') and (command[1] == 'Y') and (command[2] == 'P') and (command[3] == 'E') and (command[4] == ' ')){
           // set typeball to APL if TYPE A otherwise to normal if TYPE N
           if (command[5] == 'N') {
             aplball = 0;
-            Serial.println("Using normal 1053 typeball");
+            Serial.println("Using normal 969 typeball for 1053");
           } else if (command[5] == 'A') {
             aplball = 1;
             Serial.println("Using APL 988 typeball");
@@ -722,14 +733,21 @@ void loop() {
           Serial.println('\n');
         } else if ((command[0] == 'T') and (command[1] == 'S') and (command[2] == ' ')){
           tabcol = getcolumn(command,0);
-          Serial.print("Tab set at column "); Serial.println(tabcol);
-          updateStops(tabcol, 1);
+          if (tabcol > 0) {
+            Serial.print("Tab set at column "); Serial.println(tabcol);
+            updateStops(tabcol, 1);
+          }
         } else if ((command[0] == 'T') and (command[1] == 'C') and (command[2] == ' ')){
           tabcol = getcolumn(command,0);
-          Serial.print("Tab cleared at column "); Serial.println(tabcol);
-          updateStops(tabcol, 0);
+          if (tabcol > 0) {
+            Serial.print("Tab cleared at column "); Serial.println(tabcol);
+            updateStops(tabcol, 0);
+          }
         } else {
-          Serial.println("Not a valid command");
+          Serial.print(command[0]);
+          Serial.print(command[1]);
+          Serial.print(command[2]);
+          Serial.println(" is not a valid command");
         }
         cpointer = 0;
       }
