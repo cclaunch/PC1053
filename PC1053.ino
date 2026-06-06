@@ -35,6 +35,9 @@
 //    switches between normal and APL typeball  NOT YET SUPPORTED
 //    *******   t is either N for normal or A for APL typeball
 
+#include <stdint.h>
+#include <stddef.h>
+
 // global defines
 #define SelectT2      22
 #define SelectT1      24
@@ -72,15 +75,14 @@
 #define TabClr        49
 
 // define the sequences to print for ribbon color control
-#define ESC   '\x1b'
-#define OPEN  '['
-#define BLACK "30"
-#define RED   "91"
-
-#define WHITE "107"
-#define BOLD  "1"
-#define BACK  "0"
-#define END   'm'
+#define ESC     '\x1b'
+#define OPEN    '['
+#define BLACK   "30;1"
+#define RED     "31;1"
+#define WHITEBG "107"
+#define BOLD    "1"
+#define NOBOLD  "0"
+#define END     'm'
 
 // define states for BCD 7seg controllers
 //  LOW is LOW
@@ -114,14 +116,14 @@
 #define readCBUT !(PINL & (1<<0))
 
 // direct port access to replace digitalWrite statements
-#define offEOL   PORTE |= (1<<5)
-#define onEOL    PORTE &= ~(1<<5)
-#define offCBR   PORTE |= (1<<3)
-#define onCBR    PORTE &= ~(1<<3)
-#define offEOF   PORTH |= (1<<3)
-#define onEOF    PORTH &= ~(1<<3)
-#define offCRLFT PORTH |= (1<<4)
-#define onCRLFT  PORTH &= ~(1<<4)
+#define highEOL  PORTE |= (1<<5)
+#define lowEOL   PORTE &= ~(1<<5)
+#define highCBR  PORTE |= (1<<3)
+#define lowCBR   PORTE &= ~(1<<3)
+#define highEOF  PORTH |= (1<<3)
+#define lowEOF   PORTH &= ~(1<<3)
+#define highCRLFT PORTH |= (1<<4)
+#define lowCRLFT PORTH &= ~(1<<4)
 #define onONEA   PORTA |= (1<<1)
 #define offONEA  PORTA &= ~(1<<1)
 #define onONEB   PORTA |= (1<<3)
@@ -209,6 +211,9 @@ int oldCols =     1;
 int lmargin =     1;
 int rmargin =   120;
 int aplball =     0;
+long leap =       0;
+long retreat =    0;
+long drop =       0;
 
 char tempchar[5];
 
@@ -247,7 +252,7 @@ char * AUindex[44];
 char * ALindex[44];
 
 // tab stop table
-int stops[120];
+byte stops[120];
 
 // helper function
 // Returns the raw byte index for the N-th character in a UTF-8 array
@@ -312,10 +317,10 @@ void setup() {
   pinMode(HundredsA,    OUTPUT);
 
   // set output pins to initial state
-  offEOL;
-  onCBR;
-  offEOF;
-  offCRLFT;
+  lowEOL;
+  highCBR;
+  lowEOF;
+  lowCRLFT;
   onONEA;
   offONEB;
   offONEC;
@@ -369,16 +374,16 @@ void setup() {
      
   // Turn off End of Forms lamp and make typewriter ready
   //   signal -TWR END OF FORMS thus not asserted is high
-  onEOF;
+  highEOF;
 
   // set terminal to black ribbon
   Serial.print(ESC);
   Serial.print(OPEN);
-  Serial.print(BACK);
+  Serial.print(BOLD);
   Serial.print(END);
   Serial.print(ESC);
   Serial.print(OPEN);
-  Serial.print(WHITE);
+  Serial.print(WHITEBG);
   Serial.print(END);
   Serial.print(ESC);
   Serial.print(OPEN);
@@ -475,46 +480,76 @@ void convChar() {
   
 } // end convChar()
 
+// routine to quickly identify the next column with a tab stop set
+int find_nonzero_fast(const unsigned char *arr, size_t size) {
+    size_t i = 0;
+    
+    // 1. Align pointer to 8-byte boundary if necessary
+    while (i < size && ((uintptr_t)&arr[i] % sizeof(uint64_t) != 0)) {
+        if (arr[i] != 0) return i;
+        i++;
+    }
+    
+    // 2. Scan 8 bytes at a time
+    while (i + sizeof(uint64_t) <= size) {
+        if (*(const uint64_t *)&arr[i] != 0) {
+            // A non-zero byte exists in this 8-byte chunk; locate it
+            for (size_t j = 0; j < sizeof(uint64_t); j++) {
+                if (arr[i + j] != 0) return i + j;
+            }
+        }
+        i += sizeof(uint64_t);
+    }
+    
+    // 3. Clean up remaining trailing bytes
+    while (i < size) {
+        if (arr[i] != 0) return i;
+        i++;
+    }
+    
+    return -1;
+}
+
 // figure out distance to tab and print spaces for that length
 void doTabbing() {
   int i;
-  for (i = Cols; i < rmargin; i++) {
-    if (stops[i] == 0) {
-      Serial.print(' ');
-      updateLED();
-      Cols += 1;
-    }
-    if (stops[i] == 1) {
-      Cols += 1;
-      return;
-    }
+  int j;
+  i = find_nonzero_fast(stops+Cols, rmargin-Cols);
+  if (i == -1) {   // no more tabs set, go to margin and force CR-LF
+    Cols = rmargin;
+    return;
   }
+  // move the cursor to the spot
+  for (int j = 0; j < i+1; j++) {
+    Serial.write(' '); 
+  }
+  Cols += (i+1);
+  updateLED();
   return;
+
 } // end doTabbing()
 
 // update the tab stops based on command from PC
-void updateStops(int mypos, int val) {
-  int i;
+void updateStops(int mypos, byte val) {
   if (mypos == 0) {
     return;
   }
-  for (i = 0; i < 120; i++) {
-    if (i == (mypos - 1)) {
-      stops[i] = val;
-    }
-  }
+  stops[mypos - 1] = val;
   return;
 } // end updateStops()
 
 // return distance to tab for timing calculation
 int calcTab() {
   int i;
-  for (i = Cols; i < 120; i++) {
-    if (stops[i] == 1) {
-      return i - Cols + 1;
-    }
+  i = find_nonzero_fast(stops+Cols, rmargin-Cols);
+  if (i == -1) {   // no more tabs set, go to margin and force CR-LF
+     Cols = rmargin;
+     return 1;
   }
-  return rmargin - Cols + 1;
+  if (i == 0) {
+    return 1;
+  }
+  return i+1;
 } // end calcTab()
 
 // extracts column number from margin command
@@ -679,6 +714,7 @@ void loop() {
     //           xxx is three digit column number with leading zeroes if needed
     //           t is either N for normal or A for APL typeball
     while (Serial.available() > 0) {      // data available from serial port
+      int j;
       command[cpointer++] = Serial.read();
       if
        (cpointer > 6) {
@@ -703,7 +739,13 @@ void loop() {
           if (tabcol > 0) {
             lmargin = tabcol;
             Serial.print("Left Margin set to "); Serial.println(lmargin);
-          }
+            Serial.print('\r');
+            Serial.print('\n');
+            for (j = 1; j < lmargin; j++) {
+              Serial.print(' ');
+            }
+            Cols = lmargin;         
+          }   
         } else if ((command[0] == 'R') and (command[1] == 'M') and (command[2] == ' ')){
           tabcol = getcolumn(command,rmargin);
           if (tabcol > 0){
@@ -752,8 +794,9 @@ void loop() {
         cpointer = 0;
       }
     }
-    // emit bell sound if trying to pass the right margin
+    // emit bell sound if trying to pass the right margin and back up
     if (Cols > rmargin) {
+      Serial.print('\a');
       Serial.print('\b');
       Cols = rmargin;
     }
@@ -774,13 +817,21 @@ void loop() {
       doCrLf =        readCRLF;
       doUpShift =     readUP;
       doDownShift =   readDN;
-      doBlackShift =  readBLK;
-      doRedShift =    readRED;
       doSpaceButton = readPBUT;
       doTabButton =   readTBUT;
       doCRButton =    readRBUT;
       doTabSet =      readSBUT;
       doTabClr =      readCBUT;
+
+      // process ribbon shifts and make sure we do them just once while signal asserted
+      doBlackShift = readBLK;
+      if (doBlackShift == 0) {
+        oldBlackShift = 0;
+      }
+      doRedShift = readRED;
+      if (doRedShift == 0) {
+        oldRedShift = 0;
+      }
 
       // this is a request to type a character
       anychar = doT1 + doT2 + doR2A + doR2 + doR1 + 
@@ -852,7 +903,7 @@ void loop() {
       saveUpShift =   doUpShift;
       saveDownShift = doDownShift;
       Cstate = Trig;
-      onCBR;
+      lowCBR;
     } else if ((Cstate == Trig) and ((millis()-Ctime) > 43)) {
       Cstate = Break;
     } else if ((Cstate == Break) and ((millis()-Ctime) > 65)) {
@@ -870,22 +921,27 @@ void loop() {
       saveLineFeed =  doLineFeed;
       saveTab =       doTab;
       saveCrLf =      doCrLf;
+      if ((doTab > 0) or (doTabButton > 0)) {
+        leap = calcTab()*3+100;
+      }
+      if ((doCrLf > 0) or (doCRButton > 0)) {
+        retreat = (Cols - lmargin)*3 + 30;
+      }
+      if (doLineFeed > 0){
+        drop = 160;
+      }
     } else if ((Lstate == Wait) and ((millis()-Ltime)> 5)) {
       Lstate = Trig;
     } else if (Lstate == Trig) {
-      if ((saveTab == 1) and (millis()-Ltime) > (calcTab()*1000/40)) {
+      if ((saveTab == 1) and (millis()-Ltime) > (leap)) {
         Lstate = Break;
-      } else if ((saveCrLf == 1) and (Cols >= lmargin) and (millis() - Ltime) > ((Cols - lmargin)*1000/100)) {
+      } else if ((saveCrLf == 1) and (millis() - Ltime) > (retreat)) {
         Lstate = Break;
-      } else if ((saveCrLf == 1) and (millis() - Ltime) > ((Cols - 0)*1000/100)) {
+      } else if (gotTabButton and (millis() - Ltime) > (leap)) {
         Lstate = Break;
-      } else if (gotTabButton and (millis() - Ltime) > (calcTab()*1000/40)) {
+      } else if (gotCRButton and (millis() - Ltime) > (retreat)) {
         Lstate = Break;
-      } else if (gotCRButton and (Cols >= lmargin) and (millis() - Ltime) > ((Cols - lmargin)*1000/100)) {
-        Lstate = Break;
-      } else if (gotCRButton and (millis() - Ltime) > ((Cols - 0)*1000/100)) {
-        Lstate = Break;
-      } else if ((saveLineFeed == 1) and (millis() - Ltime) > 100) {
+      } else if ((saveLineFeed == 1) and (millis() - Ltime) > drop) {
         Lstate = Break;
       }
     } else if (Lstate == Break) {
@@ -931,14 +987,10 @@ void loop() {
        } else if ((saveCrLf == 1) or gotCRButton) {
         Serial.print('\r');
         Serial.print('\n');
-        if (Cols < lmargin) {
-          Cols = 1;
-        } else {
-          for (j = 1; j < lmargin; j++) {
-          Serial.print(' ');
-          } 
-          Cols = lmargin;         
-        }
+        for (j = 1; j < lmargin; j++) {
+        Serial.print(' ');
+        } 
+        Cols = lmargin;         
         saveCrLf = 0;
         if (gotCRButton) gotCRButton = false;
        } else if ((saveTab == 1) or gotTabButton) {
@@ -953,18 +1005,18 @@ void loop() {
 
     // Produce output signals
     if ((Cstate == Break) and (oldCstate == Trig)) {
-      offCBR;
+      highCBR;
     }
     if ((Lstate == Trig) and (oldLstate == Wait)) {
-      offCRLFT;
+      highCRLFT;
     }
-    if ((Lstate == Break) and (oldLstate == Trig)) {
-      onCRLFT;
+    if (Lstate == Break) {
+      lowCRLFT;
     }
     if (Cols >= rmargin) {
-      onEOL;
+      highEOL;
     } else {
-      offEOF;
+      lowEOL;
     }
 
     // update tab stops if button pushed
@@ -978,21 +1030,9 @@ void loop() {
     if ((doBlackShift == 1) and (oldBlackShift == 0)) {
         Serial.print(ESC);
         Serial.print(OPEN);
-        Serial.print(BACK);
-        Serial.print(END);
-        Serial.print(ESC);
-        Serial.print(OPEN);
-        Serial.print(WHITE);
-        Serial.print(END);
-        Serial.print(ESC);
-        Serial.print(OPEN);
         Serial.print(BLACK);
         Serial.print(END);      
     } else if ((doRedShift == 1) and (oldRedShift == 0)) {
-        Serial.print(ESC);
-        Serial.print(OPEN);
-        Serial.print(BOLD);
-        Serial.print(END);
         Serial.print(ESC);
         Serial.print(OPEN);
         Serial.print(RED);
