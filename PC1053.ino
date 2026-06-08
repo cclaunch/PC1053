@@ -251,6 +251,11 @@ char * Lindex[44];
 char * AUindex[44];
 char * ALindex[44];
 
+// line buffer to support overtyping
+// this holds the select code that was typed into a column previously,
+// with up to the last five stored for that position. 
+int buffer[120][5];
+
 // tab stop table
 byte stops[120];
 
@@ -405,6 +410,9 @@ void setup() {
     ALindex[i] = ALchar+getUtf88ByteIndex(ALchar,i);
   }
 
+  // clear out line buffer
+  zerobuffer();      
+
   // send menu of commands to user
   Serial.println("Available commands are:");
   Serial.println("     LM xxx            set left margin at column xxx");
@@ -420,27 +428,22 @@ void setup() {
 
 // routine to convert Selectric selection code to
 // ASCII character corresponding to typeball
-void convChar() {
+void convChar(int select, int hemisphere) {
   int i;
-  int select;
-
-  select = 0;
-  if (doT2 > 0)  bitSet(select,5);
-  if (doT1 > 0)  bitSet(select,4);
-  if (doR1 > 0)  bitSet(select,3);
-  if (doR2A > 0) bitSet(select,2);
-  if (doR2 > 0)  bitSet(select,1);
-  if (doR5 > 0)  bitSet(select,0);
 
   // look up character from Tilt-Rotate table
   int lookedup;
   lookedup = TRselect[select];
 
   // if it doesn't match a valid position, this is an invalid select code
-  if (lookedup == 44) return ('^');
+  if (lookedup == 44) {
+    tempchar[0]='^';
+    tempchar[1]= 0;
+    return;
+  }
 
   // used lookedup to grab character from table
-  if (Caps == 1) {  // upper case hemisphere
+  if (hemisphere == 1) {  // upper case hemisphere
     if (aplball == 0) {
       if (copyChar(Uindex[lookedup], tempchar, 5)) {
       } else {
@@ -480,6 +483,70 @@ void convChar() {
   
 } // end convChar()
 
+// this zeroes out the line buffer when we move to a new line
+void zerobuffer() {
+  memset(buffer, 0, sizeof(buffer));
+  return;
+}
+
+// this function adds a character to a given column of the line buffer
+// we add 1 to the code so that we can represent empty with a zero
+void addbuffer() {
+  int i;
+  int select;
+
+  select = 0;
+  if (doT2 > 0)  bitSet(select,5);
+  if (doT1 > 0)  bitSet(select,4);
+  if (doR1 > 0)  bitSet(select,3);
+  if (doR2A > 0) bitSet(select,2);
+  if (doR2 > 0)  bitSet(select,1);
+  if (doR5 > 0)  bitSet(select,0);
+
+  for (i=0;i<5;i++) {
+    if (buffer[Cols][i] == 0) {
+      if (Caps == 1) {
+        buffer[Cols][i] = select+101;
+      } else {
+        buffer[Cols][i] = select+1;
+      }
+      return;
+    }
+  }
+  // latest character always saved as last even if we lose earlier ones
+  if (Caps == 1) {
+    buffer[Cols][4] = select+101;
+  } else {
+    buffer[Cols][4] = select+1;
+  }
+  return;
+}
+
+// this function types the sequence of select codes in a column
+// the codes are +1 so they need to be adjusted first
+void typebuffer() {
+  int i;
+  int selectcode;
+  int hemisphere;
+
+  for (i=0;i<5;i++) {
+    selectcode = buffer[Cols][i];
+    if (selectcode > 100) {
+      hemisphere = 1;
+      selectcode -= 100;
+    } else {
+      hemisphere = 0;
+    }
+    if (selectcode == 0) return;
+    if (i>0) {
+      copyChar('\u200D', tempchar, sizeof('\u200D'));
+      Serial.print(tempchar); // print Zero Width Join
+    }
+    convChar(selectcode-1, hemisphere);
+    Serial.print(tempchar);
+  }
+  return;
+}
 // routine to quickly identify the next column with a tab stop set
 int find_nonzero_fast(const unsigned char *arr, size_t size) {
     size_t i = 0;
@@ -521,9 +588,15 @@ void doTabbing() {
   }
   // move the cursor to the spot
   for (int j = 0; j < i+1; j++) {
-    Serial.write(' '); 
+        // if no previous char, print space
+        if (buffer[Cols][0] == 0){
+          Serial.print(' ');
+        } else {
+          // if there was, show it instead
+          typebuffer();
+        }
+        Cols += 1;
   }
-  Cols += (i+1);
   updateLED();
   return;
 
@@ -689,6 +762,7 @@ void updateLED() {
   return;  
 } // end updateLED()
 
+
 // main processing loop
 void loop() {
 //  char value;
@@ -757,9 +831,11 @@ void loop() {
           if (command[5] == 'N') {
             aplball = 0;
             Serial.println("Using normal 969 typeball for 1053");
+            zerobuffer();
           } else if (command[5] == 'A') {
             aplball = 1;
             Serial.println("Using APL 988 typeball");
+            zerobuffer();
           } else {
             Serial.print(command[5]);
             Serial.println(" is not a valid typeball");
@@ -896,7 +972,8 @@ void loop() {
         tempchar[0]='^';
         tempchar[1]=0;
       } else {
-        convChar();
+        addbuffer(); 
+        tempchar[0] = 0;
       }
       saveSpace =     doSpace;
       saveBackSpace = doBackSpace;
@@ -951,19 +1028,31 @@ void loop() {
     // Write characters if typed
     if ((Cstate == Emit) and (oldCstate == Break)) {
       if (tempchar[0] != '^') {
-        Serial.print(tempchar);       
-        anychar = 0;
+        typebuffer();
         Cols += 1;
+        anychar = 0;
       } else if (saveSpace == 1) {
-        Serial.print(' ');
+        // if no previous char, print space
+        if (buffer[Cols][0] == 0){
+          Serial.print(' ');
+        } else {
+          // if there was, show it instead
+          typebuffer();
+        }
         Cols += 1;
        } else if (gotSpaceButton){
-        Serial.print(' ');
         gotSpaceButton = false;
         Cols += 1;
+        // if no previous char, print space
+        if (buffer[Cols][1] == 0){
+          Serial.print(' ');
+        } else {
+          // if there was, show it instead
+          typebuffer();
+        }
        } else if (saveBackSpace == 1) {
-        Serial.print('\b');
         if (Cols > lmargin) {
+          Serial.print('\b');
           Cols -= 1;
         }
        } else if (saveUpShift == 1) {
@@ -984,6 +1073,7 @@ void loop() {
       if (saveLineFeed == 1) {
         Serial.print('\n');
         saveLineFeed = 0;
+        zerobuffer(); 
        } else if ((saveCrLf == 1) or gotCRButton) {
         Serial.print('\r');
         Serial.print('\n');
