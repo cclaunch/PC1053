@@ -1,0 +1,6 @@
+These are the eighteen composite characters for APL that are formed
+when the software types the two constituent characters on the typeball
+with a backspace between the two. The emulator detects this if the APL
+typeball is installed and replaces the two with the single glyph.
+
+⍱⍲⍒⍋⌽⍉⊖⍟⌶⍫⍎⍕⍀⌿⍝⍞!⌹
