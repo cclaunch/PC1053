@@ -81,8 +81,11 @@
 #define RED     "31;1"
 #define WHITEBG "107"
 #define BOLD    "1"
-#define NOBOLD  "0"
+#define GREEN   "32;1"
 #define END     'm'
+
+// set up the special Zero Width Joiner unicode character
+char  ZWJ[]  =  "\u200D ";
 
 // define states for BCD 7seg controllers
 //  LOW is LOW
@@ -214,6 +217,8 @@ int aplball =     0;
 long leap =       0;
 long retreat =    0;
 long drop =       0;
+int RedRibbon =   0;
+int hemisphere =  0;
 
 char tempchar[5];
 
@@ -253,8 +258,32 @@ char * ALindex[44];
 
 // line buffer to support overtyping
 // this holds the select code that was typed into a column previously,
-// with up to the last five stored for that position. 
-int buffer[120][5];
+int buffer[120];
+
+// lookup table for APL codes that combine to a print a composite glyph
+// has three select codes for each, the two that are typed by the 1130
+// and the code for the new glyph
+int APLlookup[18][3] = { 157, 140, 201,  // or + tilde
+                         150, 140, 202,  // and + tilde
+                         106, 129, 203,  // del + stile
+                         110, 129, 204,  // delta + stile
+                         129, 121, 205,  // stile + circle
+                         121, 148, 206,  // circle + slope
+                         121, 118, 207,  // circle + bar
+                         121, 122, 208,  // circle + star
+                         107, 130, 209,  // uptack + downtack
+                         106, 140, 210,  // del + tilde
+                         107, 132, 211,  // uptack + null
+                         130, 132, 212,  // downtack + null
+                         148, 118, 213,  // slope + bar
+                         33,  118, 214,  // slash + bar
+                         108, 132, 215,  // cap + null
+                         123, 124, 216,  // quote + quad
+                         123,  16, 217,  // quote + dot
+                         124, 102, 218  // quad + divide
+};
+
+char composite[] = "⍱⍲⍒⍋⌽⍉⊖⍟⌶⍫⍎⍕⍀⌿⍝⍞!⌹";
 
 // tab stop table
 byte stops[120];
@@ -395,6 +424,7 @@ void setup() {
   Serial.print(BLACK);
   Serial.print(END);
   Serial.println("");
+  RedRibbon = 0;
 
   // build ptrs to each UTF-8 char in the tables
   for (i=0; i < 44; i++) {
@@ -492,8 +522,10 @@ void zerobuffer() {
 // this function adds a character to a given column of the line buffer
 // we add 1 to the code so that we can represent empty with a zero
 void addbuffer() {
-  int i;
   int select;
+  int i;
+  int savebuffer;
+  int saveselect;
 
   select = 0;
   if (doT2 > 0)  bitSet(select,5);
@@ -503,48 +535,65 @@ void addbuffer() {
   if (doR2 > 0)  bitSet(select,1);
   if (doR5 > 0)  bitSet(select,0);
 
-  for (i=0;i<5;i++) {
-    if (buffer[Cols][i] == 0) {
-      if (Caps == 1) {
-        buffer[Cols][i] = select+101;
-      } else {
-        buffer[Cols][i] = select+1;
-      }
-      return;
-    }
-  }
-  // latest character always saved as last even if we lose earlier ones
+  // first adjust by which hemisphere
   if (Caps == 1) {
-    buffer[Cols][4] = select+101;
+    saveselect = select+101;
   } else {
-    buffer[Cols][4] = select+1;
+    saveselect = select+1;
   }
-  return;
+
+  // save the select code if nothing was previously typed 
+  // in this column
+  savebuffer = buffer[Cols];
+  if (savebuffer == 0) {
+    buffer[Cols] = saveselect;
+    return;
+  } else {
+    // the apl typeball 988
+    if (aplball == 1) {
+      // See if we have a pair of select codes that match
+      // an APL composite character. If so, indicate this
+      for (i=0;i<18;i++){
+        // do we have a pair from the table?
+        if (((APLlookup[i][0] == savebuffer) and (APLlookup[i][1] == saveselect)) 
+            or ((APLlookup[i][1] == savebuffer) and (APLlookup[i][0] == saveselect))) {
+          buffer[Cols] = APLlookup[i][2];
+          return;
+        }
+      }
+      // we did not match a pair, just fall through
+    }
+    // save the character for printing
+    buffer[Cols] = saveselect;
+    return;
+  }
 }
 
-// this function types the sequence of select codes in a column
+// this function types the select codes in a column
 // the codes are +1 so they need to be adjusted first
 void typebuffer() {
   int i;
   int selectcode;
-  int hemisphere;
+  int whichchar;
 
-  for (i=0;i<5;i++) {
-    selectcode = buffer[Cols][i];
-    if (selectcode > 100) {
-      hemisphere = 1;
-      selectcode -= 100;
-    } else {
-      hemisphere = 0;
-    }
-    if (selectcode == 0) return;
-    if (i>0) {
-      copyChar('\u200D', tempchar, sizeof('\u200D'));
-      Serial.print(tempchar); // print Zero Width Join
-    }
-    convChar(selectcode-1, hemisphere);
+  selectcode = buffer[Cols];
+  if (selectcode > 200) {
+    selectcode -=200;
+    // grab the composite character
+    whichchar = getUtf88ByteIndex(composite, selectcode-1);
+    copyChar(composite+whichchar, tempchar, 5);
+    hemisphere = 1; // we pretend composites are upper case
     Serial.print(tempchar);
+    return;
+  } else if (selectcode > 100) {
+    hemisphere = 1;
+    selectcode -= 100;
+  } else {
+    hemisphere = 0;
   }
+  if (selectcode == 0) return;
+  convChar(selectcode-1, hemisphere);
+  Serial.print(tempchar);
   return;
 }
 // routine to quickly identify the next column with a tab stop set
@@ -589,7 +638,7 @@ void doTabbing() {
   // move the cursor to the spot
   for (int j = 0; j < i+1; j++) {
         // if no previous char, print space
-        if (buffer[Cols][0] == 0){
+        if (buffer[Cols] == 0){
           Serial.print(' ');
         } else {
           // if there was, show it instead
@@ -790,19 +839,42 @@ void loop() {
     while (Serial.available() > 0) {      // data available from serial port
       int j;
       command[cpointer++] = Serial.read();
-      if
-       (cpointer > 6) {
+      if (cpointer > 6) {
+        Serial.print(ESC);
+        Serial.print(OPEN);
+        Serial.print(GREEN);
+        Serial.print(END);
         Serial.print("input command ");
         Serial.print(command[0]);
         Serial.print(command[1]);
         Serial.print(command[2]);
         Serial.println(" too long, ignored");
+        Serial.print(ESC);
+        Serial.print(OPEN);
+        if (RedRibbon == 1) {
+          Serial.print(RED);
+        } else {
+          Serial.print(BLACK);
+        }
+        Serial.print(END);
         cpointer = 0;
       }
       if ((command [cpointer-1] == '\r') or (command[cpointer-1] == '\n')) {
         if (cpointer > 1) {
+          Serial.print(ESC);
+          Serial.print(OPEN);
+          Serial.print(GREEN);
+          Serial.print(END);
           Serial.print("short command ");
           Serial.println(" is ignored");
+          Serial.print(ESC);
+          Serial.print(OPEN);
+          if (RedRibbon == 1) {
+            Serial.print(RED);
+          } else {
+            Serial.print(BLACK);
+          }
+          Serial.print(END);
         }
         cpointer = 0;
       }
@@ -812,9 +884,21 @@ void loop() {
           tabcol = getcolumn(command,lmargin);
           if (tabcol > 0) {
             lmargin = tabcol;
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
             Serial.print("Left Margin set to "); Serial.println(lmargin);
             Serial.print('\r');
             Serial.print('\n');
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
             for (j = 1; j < lmargin; j++) {
               Serial.print(' ');
             }
@@ -824,23 +908,77 @@ void loop() {
           tabcol = getcolumn(command,rmargin);
           if (tabcol > 0){
             rmargin = tabcol;
-             Serial.print("Right Margin set to "); Serial.println(rmargin);
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
+            Serial.print("Right Margin set to "); Serial.println(rmargin);
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
           }
         } else if ((command[0] == 'T') and (command[1] == 'Y') and (command[2] == 'P') and (command[3] == 'E') and (command[4] == ' ')){
           // set typeball to APL if TYPE A otherwise to normal if TYPE N
           if (command[5] == 'N') {
             aplball = 0;
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
             Serial.println("Using normal 969 typeball for 1053");
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
             zerobuffer();
+            Cols = lmargin;
           } else if (command[5] == 'A') {
             aplball = 1;
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
             Serial.println("Using APL 988 typeball");
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
             zerobuffer();
+            Cols = lmargin;         
           } else {
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
             Serial.print(command[5]);
             Serial.println(" is not a valid typeball");
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
           }
         } else if ((command[0] == 'T') and (command[1] == 'A') and (command[2] == 'B') and (command[3] == 'S') and (command[4] == ' ') and (command[5] == '=')){
+          Serial.print(ESC);
+          Serial.print(OPEN);
+          Serial.print(GREEN);
+          Serial.print(END);
           Serial.print("Tab stops are set at columns");
           int i;
           for (i = 0; i < 120; i++) {
@@ -849,23 +987,67 @@ void loop() {
             }
           }
           Serial.println('\n');
+          Serial.print(ESC);
+          Serial.print(OPEN);
+          if (RedRibbon == 1) {
+            Serial.print(RED);
+          } else {
+            Serial.print(BLACK);
+          }
+          Serial.print(END);
         } else if ((command[0] == 'T') and (command[1] == 'S') and (command[2] == ' ')){
           tabcol = getcolumn(command,0);
           if (tabcol > 0) {
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
             Serial.print("Tab set at column "); Serial.println(tabcol);
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
             updateStops(tabcol, 1);
           }
         } else if ((command[0] == 'T') and (command[1] == 'C') and (command[2] == ' ')){
           tabcol = getcolumn(command,0);
           if (tabcol > 0) {
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            Serial.print(GREEN);
+            Serial.print(END);
             Serial.print("Tab cleared at column "); Serial.println(tabcol);
+            Serial.print(ESC);
+            Serial.print(OPEN);
+            if (RedRibbon == 1) {
+              Serial.print(RED);
+            } else {
+              Serial.print(BLACK);
+            }
+            Serial.print(END);
             updateStops(tabcol, 0);
           }
         } else {
+          Serial.print(ESC);
+          Serial.print(OPEN);
+          Serial.print(GREEN);
+          Serial.print(END);
           Serial.print(command[0]);
           Serial.print(command[1]);
           Serial.print(command[2]);
           Serial.println(" is not a valid command");
+          Serial.print(ESC);
+          Serial.print(OPEN);
+          if (RedRibbon == 1) {
+            Serial.print(RED);
+          } else {
+            Serial.print(BLACK);
+          }
+          Serial.print(END);
         }
         cpointer = 0;
       }
@@ -948,13 +1130,13 @@ void loop() {
     // initial character selection signals trigger a print
     if ((Cstate == Wait) and ((millis()-Ctime)> 4)) {
       // pick up any straggler selection codes
-      doT2 +=   readT2;
-      doT1 +=   readT1;
-      doR2A +=  readR2A;
-      doR1 +=   readR1;
-      doR2 +=   readR2;
-      doR5 +=   readR5;
-      doAux +=  readAUX;
+      doT2 =   readT2;
+      doT1 =   readT1;
+      doR2A =  readR2A;
+      doR1 =   readR1;
+      doR2 =   readR2;
+      doR5 =   readR5;
+      doAux =  readAUX;
       anychar = doT1 + doT2 + doR2A + doR2 + doR1 + 
         doR5 + doAux;
     }
@@ -1033,7 +1215,7 @@ void loop() {
         anychar = 0;
       } else if (saveSpace == 1) {
         // if no previous char, print space
-        if (buffer[Cols][0] == 0){
+        if (buffer[Cols] == 0){
           Serial.print(' ');
         } else {
           // if there was, show it instead
@@ -1044,7 +1226,7 @@ void loop() {
         gotSpaceButton = false;
         Cols += 1;
         // if no previous char, print space
-        if (buffer[Cols][1] == 0){
+        if (buffer[Cols] == 0){
           Serial.print(' ');
         } else {
           // if there was, show it instead
@@ -1078,8 +1260,9 @@ void loop() {
         Serial.print('\r');
         Serial.print('\n');
         for (j = 1; j < lmargin; j++) {
-        Serial.print(' ');
+          Serial.print(' ');
         } 
+        zerobuffer(); 
         Cols = lmargin;         
         saveCrLf = 0;
         if (gotCRButton) gotCRButton = false;
@@ -1122,11 +1305,13 @@ void loop() {
         Serial.print(OPEN);
         Serial.print(BLACK);
         Serial.print(END);      
+        RedRibbon = 0;
     } else if ((doRedShift == 1) and (oldRedShift == 0)) {
         Serial.print(ESC);
         Serial.print(OPEN);
         Serial.print(RED);
         Serial.print(END);
+        RedRibbon = 1;
     }
     oldBlackShift = doBlackShift;
     oldRedShift =   doRedShift;
