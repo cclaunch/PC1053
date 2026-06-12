@@ -404,13 +404,8 @@ void setup() {
 
   // start communications with PC
   Serial.begin(9600);
-  Serial.println("PC1053 is active");
-     
-  // Turn off End of Forms lamp and make typewriter ready
-  //   signal -TWR END OF FORMS thus not asserted is high
-  highEOF;
 
-  // set terminal to black ribbon
+  // set terminal to green ribbon for startup message
   Serial.print(ESC);
   Serial.print(OPEN);
   Serial.print(BOLD);
@@ -421,10 +416,18 @@ void setup() {
   Serial.print(END);
   Serial.print(ESC);
   Serial.print(OPEN);
-  Serial.print(BLACK);
+  Serial.print(GREEN);
   Serial.print(END);
   Serial.println("");
   RedRibbon = 0;
+
+  // startup hello message
+  Serial.println("1053 Emulator is active");
+     
+  // Turn off End of Forms lamp and make typewriter ready
+  //   signal -TWR END OF FORMS thus not asserted is high
+  highEOF;
+
 
   // build ptrs to each UTF-8 char in the tables
   for (i=0; i < 44; i++) {
@@ -453,6 +456,12 @@ void setup() {
   Serial.println("     TYPE *            set typeball to * :");
   Serial.println("          N            Normal console typeball (969)");
   Serial.println("          A            APL typeball (988)");
+
+  // ribbon back to black
+  Serial.print(ESC);
+  Serial.print(OPEN);
+  Serial.print(BLACK);
+  Serial.print(END);      
 
 } // end of Setup()
 
